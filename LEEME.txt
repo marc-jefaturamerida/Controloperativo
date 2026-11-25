@@ -1,0 +1,13 @@
+CONTROL OPERATIVO — INTEGRACIÓN 08 (PWA)
+
+Instalación:
+1. Conserva una copia de index.html de la etapa 7. Antes de actualizar, sincroniza las capturas pendientes de cada dispositivo cuando sea posible.
+2. En la misma carpeta de GitHub Pages que contiene index.html, agrega manifest.webmanifest, icon-192.png, icon-512.png y sw.js. Los nombres son exactos. No publiques el ZIP ni LEEME.txt.
+3. Edita el index.html existente en GitHub, pega todo el código del nuevo index.html y confirma los cambios. El index se publica al final.
+4. Abre https://marc-jefaturamerida.github.io/Controloperativo/ con internet. Comprueba que aparece Etapa 8 y Aplicación preparada · PWA. Inicia sesión y abre Control de registros; espera a que se consulten los datos de Supabase.
+5. Instala usando el botón Instalar aplicación o el menú de Chrome/Edge. En iPhone usa Safari > Compartir > Añadir a pantalla de inicio. Si la app instalada abre una sesión independiente, inicia sesión en ella con internet antes de probarla offline.
+6. Sin cerrar sesión, desconecta internet, cierra la ventana y vuelve a abrir desde el icono. Comprueba la cola, captura un folio nuevo de prueba y reconecta. Verifica la confirmación en el supervisor.
+
+No requiere ejecutar SQL ni cambiar Edge Function. Solo se almacenan archivos públicos del programa en Cache Storage; los datos operativos mínimos de captura y las operaciones pendientes se guardan en IndexedDB. Las credenciales de Supabase siguen gestionándose por su SDK. Nunca se guardan los datos temporales de nombre, teléfono y correo del cliente en el contexto offline. El cierre de sesión offline es local, no una revocación inmediata en servidor. No se permite iniciar sesión nueva offline. El plazo de 24 horas depende del reloj del dispositivo; las revocaciones remotas se conocen al reconectar. No hay sincronización con la aplicación cerrada. No borres los datos del sitio mientras haya capturas sin confirmar. En dispositivos compartidos, cierra sesión al terminar.
+
+Para futuras actualizaciones, cambia la versión de caché en sw.js y publica el index y el worker correspondientes. Si hay cambios de estructura, conserva la base IndexedDB de las operaciones pendientes. No se validó la instalación contra el GitHub Pages o Supabase reales.

@@ -1,8 +1,8 @@
-/* Control operativo 1.2.0-pre.9: cache only the public application shell. Never cache API/auth/storage responses. */
+/* Control operativo 1.2.0-pre.10: cache only the public application shell. Never cache API/auth/storage responses. */
 'use strict';
 const ROOT=new URL(self.registration.scope);
 const PREFIX='co-pwa-'+ROOT.pathname+'-';
-const CACHE=PREFIX+'v1-2-0-pre-9-marc';
+const CACHE=PREFIX+'v1-2-0-pre-10-marc';
 const INDEX=new URL('index.html',ROOT).href;
 const SDK='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js';
 const LOCAL=['index.html','manifest.webmanifest','icon-192.png','icon-512.png','logo-marc.png'].map(x=>new URL(x,ROOT).href);

@@ -6,15 +6,21 @@ window.openPhysical140=async function(){
  const note=el('p');root.append(note);const tell=t=>note.textContent=t;
  const read=()=>tx7('settings','readonly',(s,done)=>{const q=s.get(key);q.onsuccess=()=>done(q.result)});
  let revision;
- const save=v=>tx7('settings','readwrite',(store,done,abort)=>{
+ const save=(v,stash=null,removeKey=null)=>tx7('settings','readwrite',(store,done,abort)=>{
    const request=store.get(key);
    request.onsuccess=()=>{
      if(stale||request.result?.revision!==revision){stale=true;abort(Error('Otra ventana cambió el conteo. Vuelve a abrirlo.'));return}
+     if(stash&&request.result?.rows){
+       const slot=key+':'+stash+':'+crypto.randomUUID();
+       store.put({...request.result,slotDate:new Date().toISOString()},slot);
+     }
+     if(removeKey)store.delete(removeKey);
      const next=crypto.randomUUID();store.put({...v,revision:next},key);done(next);
    };
  }).then(next=>{revision=next});
 
  let data;try{data=await read();revision=data?.revision;}catch(e){tell(fail(e));return;}if(!valid())return;
+ if(data&&!data.rows)data=null;
  if(data&&(data.role!==owner.rol||data.scope!==owner.sucursal_id||data.generation!==localEpoch126(owner).records))data=null;
  const tools=el('div');tools.className='toolbar';root.append(tools);
  const button=(parent,label,fn)=>{const b=el('button',label);b.type='button';b.className='btn';b.onclick=async()=>{if(!valid())return;try{await fn()}catch(e){tell(fail(e))}};parent.append(b);return b};
@@ -24,9 +30,49 @@ window.openPhysical140=async function(){
  const size=el('select');opt(size,[['50','50'],['100','100'],['250','250'],['999999','Todas']],'50');tools.append(size);
  const stats=el('div'),list=el('div'),pager=el('div');pager.className='toolbar';const tabs=el('div');root.append(stats,tabs,list,pager);let page=0,chain=Promise.resolve();
  const persist=()=>{const snapshot=structuredClone(data);chain=chain.catch(()=>{}).then(()=>save(snapshot));return chain.catch(e=>{stale=true;if(note.isConnected)tell('No se guardó el último cambio. Vuelve a abrir el inventario. '+fail(e));throw e})};
- function draw(){if(!valid())return;closeButton.disabled=!data||data.closed;list.replaceChildren();pager.replaceChildren();if(!data){stats.textContent='Carga un Excel para comenzar.';return;}resumenFisico(stats,data.rows,r=>r.estado_revision);
- filtrosFisicos(tabs,filter.value,data.rows.some(r=>r.estado_revision==='pendiente'),key=>{filter.value=key;page=0;draw()});
- const q=search.value.trim().toLowerCase(),rows=data.rows.filter(r=>(!filter.value||r.estado_revision===filter.value)&&(!q||r.search.includes(q)||r.comentario.toLowerCase().includes(q)));const n=Number(size.value);page=Math.max(0,Math.min(page,Math.ceil(rows.length/n)-1));
+ const localAdmin=()=>owner.rol==='administrador';
+ const storagePanel=el('section');root.append(storagePanel);
+ button(tools,'Mis inventarios locales',async()=>{
+   const slots=await tx7('settings','readonly',(store,done)=>{
+     const found=[],cursor=store.openCursor(IDBKeyRange.bound(key+':',key+':\uffff'));
+     cursor.onsuccess=()=>{const it=cursor.result;if(!it){done(found);return;}
+       const v=it.value,trash=String(it.key).startsWith(key+':papelera:');
+       if(v.role===owner.rol&&v.scope===owner.sucursal_id&&v.generation===localEpoch126(owner).records&&(!trash||localAdmin())){
+         found.push({slot:it.key,label:(v.nombre_archivo||v.module)+' · '+(v.slotDate||'').slice(0,10),trash});
+       }it.continue();};
+   });
+   if(!valid())return;
+   storagePanel.replaceChildren(el('h3','Inventarios de este dispositivo'));
+   if(!slots.length)storagePanel.append(el('p','Sin otros inventarios locales.'));
+   for(const item of slots){
+     const line=el('div');line.className='toolbar';line.append(el('span',item.label+(item.trash?' · Papelera':'')));
+     button(line,item.trash?'Restaurar y abrir':'Abrir',async()=>{
+       if(!confirm('¿Abrir '+item.label+'? El conteo actual quedará guardado.'))return;
+       await chain;const v=await tx7('settings','readonly',(store,done)=>{const q=store.get(item.slot);q.onsuccess=()=>done(q.result)});
+       if(!v||!valid())return;
+       await save(v,'guardado',item.slot);data=v;page=0;storagePanel.replaceChildren();draw();
+     });
+     storagePanel.append(line);
+   }
+ });
+ if(localAdmin())button(tools,'Enviar inventario a la Papelera',async()=>{
+   if(!data||!confirm('¿Retirar el inventario local '+(data.nombre_archivo||data.module)+' completo?'))return;
+   await chain;await save({},'papelera');data=null;storagePanel.replaceChildren();draw();tell('Disponible en Mis inventarios locales.');
+ });
+ button(tools,'Filas retiradas',()=>{
+   storagePanel.replaceChildren();const removed=data?.rows.filter(r=>r.retirado_en)||[];
+   if(!removed.length)storagePanel.append(el('p','Sin filas retiradas.'));
+   for(const r of removed){const line=el('div');line.className='toolbar';line.append(el('span',r.codigo_barras));
+     if(localAdmin()&&!data.closed)button(line,'Restaurar',async()=>{
+       if(data.closed||!confirm('¿Restaurar '+r.codigo_barras+'?'))return;
+       delete r.retirado_en;await persist();storagePanel.replaceChildren();draw();
+     });
+     storagePanel.append(line);
+   }
+ });
+ function draw(){if(!valid())return;storagePanel.replaceChildren();closeButton.disabled=!data||data.closed;list.replaceChildren();pager.replaceChildren();if(!data){tabs.replaceChildren();stats.textContent='Carga un Excel para comenzar.';return;}const activeRows=data.rows.filter(r=>!r.retirado_en);resumenFisico(stats,activeRows,r=>r.estado_revision);
+ filtrosFisicos(tabs,filter.value,activeRows.some(r=>r.estado_revision==='pendiente'),key=>{filter.value=key;page=0;draw()});
+ const q=search.value.trim().toLowerCase(),rows=activeRows.filter(r=>(!filter.value||r.estado_revision===filter.value)&&(!q||r.search.includes(q)||r.comentario.toLowerCase().includes(q)));const n=Number(size.value);page=Math.max(0,Math.min(page,Math.ceil(rows.length/n)-1));
  for(const r of rows.slice(page*n,(page+1)*n)){let panel;
  const line=tarjetaFisica(r,r.estado_revision,!!data.closed,async checked=>{
    if(!valid()||data.closed)return;
@@ -40,6 +86,10 @@ window.openPhysical140=async function(){
    else{
      const st=el('select');opt(st,Object.entries(invStatus).filter(([k])=>!data.inicioPresente||k!=='pendiente'),r.estado_revision);
      st.setAttribute('aria-label','Estado de la tarjeta');const c=el('textarea');c.value=r.comentario;c.maxLength=32767;c.placeholder='Comentario';c.setAttribute('aria-label','Comentario');
+     if(localAdmin())button(panel,'Enviar fila a la Papelera',async()=>{
+       if(data.closed||!confirm('¿Quitar '+r.codigo_barras+' de este conteo?'))return;
+       r.retirado_en=new Date().toISOString();await persist();draw();
+     });
      panel.append(st,c);button(panel,'Guardar detalle',async()=>{
        if(data.closed)return;
        if(st.value==='incidencia'&&!c.value.trim()){tell('Escribe un comentario para la incidencia.');return;}
@@ -50,16 +100,16 @@ window.openPhysical140=async function(){
  });
  list.append(line);
  }button(pager,'Anterior',()=>{page--;draw()});pager.append(el('span',`${rows.length} resultados · página ${page+1}`));button(pager,'Siguiente',()=>{page++;draw()});}
- file.onchange=async()=>{try{if(!valid()||offline7||!file.files[0])return;if(data&&!confirm('¿Sustituir el inventario local anterior?'))return;await verifyAction();const f=file.files[0],bytes=await f.arrayBuffer(),book=await Excel4.loadWorkbook(bytes),config=Object.create(null),rows=[],modules=new Set(),codes=new Set();for(const sh of book.sheets){const a=sh.autodetect;if(!a?.barcodeCol||!a.moduleCol)continue;if([a.barcodeCol,a.moduleCol,a.cardCol].includes('H'))throw Error('La columna H está ocupada por un identificador en '+sh.name);if(!confirm('¿Incluir hoja '+sh.name+' y utilizar H para comentarios?'))continue;config[sh.name]={...a,path:sh.path,hConfirmed:true};for(const row of sh.rows){if(row.n<=a.headerRow||!Excel4.getV(row,a.barcodeCol))continue;const code=Excel4.codeDisplay(Excel4.getV(row,a.barcodeCol)),module=String(Excel4.getV(row,a.moduleCol)).trim();if(!/^\d{21}$/.test(code)||!module||codes.has(code))throw Error('Código inválido, duplicado o módulo ausente: '+sh.name+' fila '+row.n);codes.add(code);modules.add(module);const comment=String(Excel4.getV(row,'H'));rows.push({hoja_excel:sh.name,numero_fila:row.n,codigo_barras:code,estado_revision:'si',comentario:comment,comentario_original:comment,search:Object.values(row.vals).join(' ').toLowerCase()})}}if(!rows.length||modules.size!==1)throw Error('Se requiere un módulo único y tarjetas válidas');const module=[...modules][0];const branch=take(await db.rpc('marc_physical_branch_140',{p_module:module}));if(!valid())return;const next={inicioPresente:true,role:owner.rol,scope:owner.sucursal_id,generation:localEpoch126(owner).records,module,branch,bytes,config,rows,ext:f.name.split('.').pop().toLowerCase()};await chain;await save(next);data=next;page=0;draw();tell('Inventario guardado localmente.');}catch(e){tell(fail(e))}finally{file.value=''}};
+ file.onchange=async()=>{try{if(!valid()||offline7||!file.files[0])return;if(data&&!confirm('¿Guardar el inventario actual en Mis inventarios locales y abrir el nuevo?'))return;await verifyAction();const f=file.files[0],bytes=await f.arrayBuffer(),book=await Excel4.loadWorkbook(bytes),config=Object.create(null),rows=[],modules=new Set(),codes=new Set();for(const sh of book.sheets){const a=sh.autodetect;if(!a?.barcodeCol||!a.moduleCol)continue;if([a.barcodeCol,a.moduleCol,a.cardCol].includes('H'))throw Error('La columna H está ocupada por un identificador en '+sh.name);if(!confirm('¿Incluir hoja '+sh.name+' y utilizar H para comentarios?'))continue;config[sh.name]={...a,path:sh.path,hConfirmed:true};for(const row of sh.rows){if(row.n<=a.headerRow||!Excel4.getV(row,a.barcodeCol))continue;const code=Excel4.codeDisplay(Excel4.getV(row,a.barcodeCol)),module=String(Excel4.getV(row,a.moduleCol)).trim();if(!/^\d{21}$/.test(code)||!module||codes.has(code))throw Error('Código inválido, duplicado o módulo ausente: '+sh.name+' fila '+row.n);codes.add(code);modules.add(module);const comment=String(Excel4.getV(row,'H'));rows.push({hoja_excel:sh.name,numero_fila:row.n,codigo_barras:code,estado_revision:'si',comentario:comment,comentario_original:comment,search:Object.values(row.vals).join(' ').toLowerCase()})}}if(!rows.length||modules.size!==1)throw Error('Se requiere un módulo único y tarjetas válidas');const module=[...modules][0];const branch=take(await db.rpc('marc_physical_branch_140',{p_module:module}));if(!valid())return;const next={nombre_archivo:f.name,inicioPresente:true,role:owner.rol,scope:owner.sucursal_id,generation:localEpoch126(owner).records,module,branch,bytes,config,rows,ext:f.name.split('.').pop().toLowerCase()};await chain;await save(next,'guardado');data=next;page=0;draw();tell('Inventario guardado localmente.');}catch(e){tell(fail(e))}finally{file.value=''}};
  const closeButton=button(tools,'Cerrar inventario',async()=>{
    if(!data||data.closed)return;
-   const pending=data.rows.filter(r=>r.estado_revision==='pendiente').length;
-   if(!confirm('Quedan '+pending+' tarjetas pendientes. Al cerrar pasarán a «No la tenemos». ¿Confirmas el cierre definitivo?'))return;
-   const closed={...data,closed:true,rows:data.rows.map(r=>r.estado_revision==='pendiente'?{...r,estado_revision:'no'}:r)};
+   const removed=data.rows.filter(r=>r.retirado_en).length;const pending=data.rows.filter(r=>!r.retirado_en&&r.estado_revision==='pendiente').length;
+   if(!confirm((removed?'Quedarán definitivamente fuera '+removed+' filas retiradas. Cancela para revisarlas en Filas retiradas. ':'')+'Quedan '+pending+' tarjetas pendientes. Al cerrar pasarán a «No la tenemos». ¿Confirmas el cierre definitivo?'))return;
+   const closed={...data,closed:true,rows:data.rows.map(r=>!r.retirado_en&&r.estado_revision==='pendiente'?{...r,estado_revision:'no'}:r)};
    data=closed;draw();
    try{await persist();tell('Inventario cerrado y guardado.')}
    catch(e){data=await read();revision=data?.revision;draw();throw e}
  });
- button(tools,'Exportar Excel',async()=>{if(!data)return;await chain;if(data.rows.some(r=>r.estado_revision==='pendiente'))throw Error('Hay tarjetas pendientes. Termina el conteo o confirma el cierre antes de exportar.');const rows=data.rows;const blob=await Excel4.exportBook(data.bytes,rows,data.config,data.ext);const check=await verifyExcluded61(data.bytes,blob,data.config);if(!check.ok)throw Error('No se verificó la conservación del libro');if(!valid())return;saveInv61(blob,`Inventario ${data.module} Semana ${invWeek(new Date().toISOString().slice(0,10))[1]}.${data.ext}`.replace(/[\\/:*?"<>|]/g,''))});
+ button(tools,'Exportar Excel',async()=>{if(!data)return;await chain;if(data.rows.some(r=>!r.retirado_en&&r.estado_revision==='pendiente'))throw Error('Hay tarjetas pendientes. Termina el conteo o confirma el cierre antes de exportar.');const rows=data.rows.filter(r=>!r.retirado_en);const blob=await Excel4.exportBook(data.bytes,rows,data.config,data.ext,data.rows.filter(r=>r.retirado_en));const check=await verifyExcluded61(data.bytes,blob,data.config);if(!check.ok)throw Error('No se verificó la conservación del libro');if(!valid())return;saveInv61(blob,`Inventario ${data.module} Semana ${invWeek(new Date().toISOString().slice(0,10))[1]}.${data.ext}`.replace(/[\\/:*?"<>|]/g,''))});
  for(const c of [search,filter,size])c.oninput=()=>{page=0;draw()};draw();
 };

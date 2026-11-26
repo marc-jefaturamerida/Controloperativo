@@ -1,0 +1,54 @@
+-- Ejecutar en SQL Editor como postgres después de la migración. Todo se revierte.
+begin;
+do $$
+declare p_id uuid; a_id uuid; actor record; branch_id uuid;
+ r public.marc_tutorial_requests; r2 public.marc_tutorial_requests; r3 public.marc_tutorial_requests;
+ a public.marc_tutorial_attempts; trial uuid := gen_random_uuid(); denied boolean; visible boolean;
+begin
+ select p.id,p.sucursal_id into p_id,branch_id from public.perfiles p join public.sucursales s on s.id=p.sucursal_id where p.activo and p.rol='promotor' and s.activa limit 1;
+ select id into a_id from public.perfiles where activo and rol='administrador' limit 1;
+ if p_id is null or a_id is null then raise exception 'Se requiere administrador y promotor activos'; end if;
+ if not exists(select 1 from pg_class where oid='public.marc_tutorial_requests'::regclass and relrowsecurity) then raise exception 'RLS no activo'; end if;
+ if has_table_privilege('anon','public.marc_tutorial_requests','SELECT') or has_function_privilege('anon','public.marc_tutorial_request_106(uuid)','EXECUTE') or has_table_privilege('authenticated','public.marc_tutorial_requests','INSERT') or has_table_privilege('authenticated','public.marc_tutorial_requests','UPDATE') or has_table_privilege('authenticated','public.marc_tutorial_requests','DELETE') then raise exception 'Privilegios incorrectos'; end if;
+ raise notice 'Correcto: RLS, anon y escritura directa';
+ perform set_config('request.jwt.claim.sub',p_id::text,true); perform set_config('request.jwt.claims',json_build_object('sub',p_id,'role','authenticated')::text,true); execute 'set local role authenticated';
+ select * into a from public.marc_tutorial_save_104(trial,22,'completado',now());
+ execute 'reset role';
+ perform set_config('request.jwt.claim.sub',a_id::text,true); perform set_config('request.jwt.claims',json_build_object('sub',a_id,'role','authenticated')::text,true); execute 'set local role authenticated';
+ select * into r from public.marc_tutorial_request_106(p_id);
+ select * into r2 from public.marc_tutorial_request_106(p_id);
+ if r.request_id is null or r.user_id<>p_id or r.request_id<>r2.request_id then raise exception 'Solicitud duplicada o incorrecta'; end if;
+ denied:=false; begin perform public.marc_tutorial_request_106(a_id); exception when invalid_parameter_value then denied:=true; end;
+ if not denied then raise exception 'Solicitud a perfil inválido permitida'; end if;
+ execute 'reset role'; raise notice 'Correcto: administrador, solicitud única pendiente y perfil válido';
+ for actor in select p.id,p.rol,p.sucursal_id from public.perfiles p join public.sucursales s on s.id=p.sucursal_id where p.activo and s.activa and p.rol in ('promotor','supervisor') loop
+  perform set_config('request.jwt.claim.sub',actor.id::text,true); perform set_config('request.jwt.claims',json_build_object('sub',actor.id,'role','authenticated')::text,true); execute 'set local role authenticated';
+  select exists(select 1 from public.marc_tutorial_requests where request_id=r.request_id) into visible;
+  if visible is distinct from (actor.id=p_id or (actor.rol='supervisor' and actor.sucursal_id=branch_id)) then raise exception 'Visibilidad incorrecta para %',actor.id; end if;
+  denied:=false; begin perform public.marc_tutorial_request_106(p_id); exception when insufficient_privilege then denied:=true; end;
+  if not denied then raise exception 'Rol no administrador puede solicitar'; end if;
+  execute 'reset role';
+ end loop;
+ raise notice 'Correcto: permisos de los promotores y supervisores activos disponibles';
+ if not exists(select 1 from public.perfiles p join public.sucursales s on s.id=p.sucursal_id where p.activo and s.activa and p.rol='supervisor' and p.sucursal_id=branch_id) then raise notice 'Pendiente: supervisor de la sucursal inexistente'; end if;
+ if not exists(select 1 from public.perfiles p join public.sucursales s on s.id=p.sucursal_id where p.activo and s.activa and p.rol='supervisor' and p.sucursal_id<>branch_id) then raise notice 'Pendiente: supervisor de otra sucursal inexistente'; end if;
+ if not exists(select 1 from public.perfiles p join public.sucursales s on s.id=p.sucursal_id where p.activo and s.activa and p.rol='promotor' and p.id<>p_id) then raise notice 'Pendiente: segundo promotor inexistente'; end if;
+ perform set_config('request.jwt.claim.sub',p_id::text,true); perform set_config('request.jwt.claims',json_build_object('sub',p_id,'role','authenticated')::text,true); execute 'set local role authenticated';
+ select * into a from public.marc_tutorial_save_104(r.request_id,0,'omitido',now());
+ if a.status<>'omitido' then raise exception 'Omisión fallida'; end if;
+ select * into a from public.marc_tutorial_save_104(r.request_id,22,'completado',now());
+ if a.status<>'omitido' then raise exception 'Omisión sobrescrita'; end if;
+ execute 'reset role';
+ perform set_config('request.jwt.claim.sub',a_id::text,true); perform set_config('request.jwt.claims',json_build_object('sub',a_id,'role','authenticated')::text,true); execute 'set local role authenticated';
+ select * into r3 from public.marc_tutorial_request_106(p_id);
+ if r3.request_id=r.request_id then raise exception 'No se creó una nueva solicitud tras omisión'; end if;
+ execute 'reset role';
+ perform set_config('request.jwt.claim.sub',p_id::text,true); perform set_config('request.jwt.claims',json_build_object('sub',p_id,'role','authenticated')::text,true); execute 'set local role authenticated';
+ select * into a from public.marc_tutorial_save_104(r3.request_id,0,'en_progreso',now());
+ if a.status<>'en_progreso' then raise exception 'Inicio de repetición fallido'; end if;
+ select * into a from public.marc_tutorial_save_104(r3.request_id,22,'completado',now());
+ if a.status<>'completado' then raise exception 'Finalización de repetición fallida'; end if;
+ if (select count(*) from public.marc_tutorial_attempts where user_id=p_id and attempt_id in (trial,r.request_id,r3.request_id))<>3 or not exists(select 1 from public.marc_tutorial_attempts where user_id=p_id and attempt_id=trial and status='completado') then raise exception 'Historial no conservado'; end if;
+ execute 'reset role'; raise notice 'Correcto: omisión, nueva solicitud, aceptación, finalización e historial independiente';
+end $$;
+rollback;

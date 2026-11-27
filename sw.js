@@ -1,11 +1,11 @@
-/* MARC 1.5.1: cache only the public application shell. Never cache API/auth/storage responses. */
+/* MARC v2.0: cache only the public application shell. Never cache API/auth/storage responses. */
 'use strict';
 const ROOT=new URL(self.registration.scope);
 const PREFIX='co-pwa-'+ROOT.pathname+'-';
-const CACHE=PREFIX+'v1-5-1-avisos-editor';
+const CACHE=PREFIX+'v2-0-registros-excel';
 const INDEX=new URL('index.html',ROOT).href;
 const SDK='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js';
-const LOCAL=['index.html','manifest.webmanifest','icon-192.png','icon-512.png','logo-marc.png','physical-local-140.js','stock-import-130.js','stock-import-ui-130.js','talleres-140.js?v=1.4.4','push-140.js?v=1.4.4','avisos-150.js?v=1.5.1'].map(x=>new URL(x,ROOT).href);
+const LOCAL=['index.html','manifest.webmanifest','icon-192.png','icon-512.png','logo-marc.png','physical-local-140.js','stock-import-130.js','stock-import-ui-130.js','record-import-20.js?v=2.0','record-import-ui-20.js?v=2.0','talleres-140.js?v=1.4.4','push-140.js?v=1.4.4','avisos-150.js?v=1.5.1'].map(x=>new URL(x,ROOT).href);
 const STATIC=new Set([...LOCAL,SDK]);
 async function fetchStatic(url){const r=await fetch(url,{cache:'reload',credentials:url===SDK?'omit':'same-origin',mode:url===SDK?'cors':'same-origin'});if(!r.ok||r.type==='opaque')throw new Error('No se pudo preparar '+url);return r;}
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE);try{const files=await Promise.all([...STATIC].map(async url=>[url,await fetchStatic(url)]));for(const [url,res] of files)await c.put(url,res);await self.skipWaiting();}catch(err){await caches.delete(CACHE);throw err;}})()));

@@ -1,8 +1,8 @@
-/* MARC v2.1.4: cache only the public application shell. Never cache API/auth/storage responses. */
+/* MARC v2.1.5: cache only the public application shell. Never cache API/auth/storage responses. */
 'use strict';
 const ROOT=new URL(self.registration.scope);
 const PREFIX='co-pwa-'+ROOT.pathname+'-';
-const CACHE=PREFIX+'v2-1-4-tarjetas-r2';
+const CACHE=PREFIX+'v2-1-5-promotor';
 const INDEX=new URL('index.html',ROOT).href;
 const SDK='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js';
 const LOCAL=['index.html','manifest.webmanifest','icon-192.png','icon-512.png','logo-marc.png','physical-local-140.js','stock-import-130.js','stock-import-ui-130.js','jefatura-21.js?v=2.1.3','record-import-20.js?v=2.0','record-import-ui-20.js?v=2.0','talleres-140.js?v=1.4.4','push-140.js?v=1.4.4','avisos-150.js?v=1.5.1'].map(x=>new URL(x,ROOT).href);

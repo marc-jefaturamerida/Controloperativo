@@ -1,4 +1,4 @@
-/* MARC 2.1.9 — reporte personal diario, sin persistencia local. */
+/* MARC 2.1.10 — reporte personal diario, sin persistencia local. */
 'use strict';
 (function(){
  function stamp(now,zone){const p=new Intl.DateTimeFormat('en-GB',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now);const v=k=>p.find(x=>x.type===k).value;return {day:`${v('year')}-${v('month')}-${v('day')}`,date:`${v('day')}/${v('month')}/${v('year')}`,time:`${v('hour')}:${v('minute')}`};}
